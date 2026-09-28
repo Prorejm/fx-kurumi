@@ -2,14 +2,15 @@
    market.js — 行情引擎
    离线: data/snapshot.js 内置真实历史
    在线: 腾讯财经 qt.gtimg.cn (实时) / ifzq.gtimg.cn (分时·日线)
-   两个通道均为跨域开放接口, 无需 Key
+   均为跨域开放接口, 无需 Key
+   注: web.ifzq.gtimg.cn 已被腾讯 WAF 拦截(501), 故统一改用 ifzq.gtimg.cn
    ========================================================== */
 window.Market = (function () {
   'use strict';
 
   const RT_URL = 'https://qt.gtimg.cn/q=';
-  const MIN_URL = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
-  const DAY_URL = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
+  const MIN_URL = 'https://ifzq.gtimg.cn/appstock/app/minute/query?code=';
+  const DAY_URL = 'https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
 
   const S = {
     meta: [], dates: [], series: {}, bench: 'sh000300',
@@ -17,7 +18,15 @@ window.Market = (function () {
     quotes: {},        // code -> 实时快照
     intraday: {},      // code -> [{t,p,v}]
     startIdx: 0,
-    online: false, lastTickAt: 0
+    online: false, lastTickAt: 0,
+    scale: {},         // code -> 价格缩放 (100 股价 / 10000 汇率·净值)
+    byCode: {},        // code -> meta  (O(1) 查询)
+    cbSet: {},         // 可转债集合
+    listIdx: {},       // 可转债首个有效交易日下标
+    divcal: [],        // 除权日历 [{c,d,s}]
+    divByDate: {},     // 日期 -> 除权事件数组
+    news: [],          // RSS 财经快讯 [{t,src,d,u}]
+    newsFetchedAt: 0   // 最近一次在线抓取时间戳
   };
 
   function dec(buf) {
@@ -35,18 +44,55 @@ window.Market = (function () {
 
   /* ---------- 初始化 ---------- */
   function init(snap) {
-    const ZONE = { main: 'A', gem: 'A', star: 'A', us: 'US', hk: 'HK', fx: 'FX', fd: 'FD' };
+    const ZONE = {
+      main: 'A', gem: 'A', star: 'A', us: 'US', hk: 'HK', fx: 'FX',
+      fd: 'FD', rp: 'RP', wm: 'WM', cb: 'CB'
+    };
     S.meta = snap.m.map(a => ({
       code: a[0], name: a[1], ind: a[2],
       market: a[3], limitPct: a[4],
-      tradable: a[3] !== 'index',
+      /* rp(逆回购) / wm(银行理财) 不是「股票池里的可交易标的」——
+         逆回购走理财中心的期限下单, 理财走净值申购, 都不进自选列表 */
+      tradable: a[3] !== 'index' && a[3] !== 'rp' && a[3] !== 'wm',
       zone: a[3] === 'index' ? 'IDX' : (ZONE[a[3]] || 'A')
     })).filter(s => !S.seen_(s.code));
     S.dates = snap.d;
     S.series = snap.s;
+    S.divcal = snap.dv || [];       // 除权日历 [{c,d,s}]
+    S.news = snap.news || [];       // 内置 RSS 快讯 (构建期抓取)
     S.idx = snap.d.length - 1;
     S.startIdx = S.idx;
+    buildIndex();
     return S.meta.length;
+  }
+
+  /* 首个非零 bar (可转债上市首日判定) */
+  function firstLiveBar(code) {
+    const arr = S.series[code];
+    if (!arr) return -1;
+    for (let i = 0; i < S.dates.length; i++) {
+      const b = i * 5;
+      if (b + 3 >= arr.length) break;
+      if (arr[b + 3] > 0) return i;
+    }
+    return -1;
+  }
+
+  /* 建立 O(1) 索引: 缩放 / meta / 可转债集合 / 上市首日 */
+  function buildIndex() {
+    S.scale = {}; S.byCode = {}; S.cbSet = {}; S.listIdx = {};
+    S.divByDate = {};
+    for (const m of S.meta) {
+      S.byCode[m.code] = m;
+      S.scale[m.code] = (m.market === 'fx' || m.market === 'wm') ? 10000 : 100;
+      if (m.market === 'cb') {
+        S.cbSet[m.code] = 1;
+        S.listIdx[m.code] = firstLiveBar(m.code);
+      }
+    }
+    for (const e of S.divcal) {
+      (S.divByDate[e.d] || (S.divByDate[e.d] = [])).push(e);
+    }
   }
 
   const seen = {};
@@ -58,7 +104,7 @@ window.Market = (function () {
     if (!arr) return null;
     const b = i * 5;
     if (b + 4 >= arr.length) return null;
-    const sc = code.indexOf('fx') === 0 ? 10000 : 100;
+    const sc = S.scale[code] || 100;
     return {
       d: S.dates[i], o: arr[b] / sc, h: arr[b + 1] / sc,
       l: arr[b + 2] / sc, c: arr[b + 3] / sc, v: arr[b + 4]
@@ -129,9 +175,23 @@ window.Market = (function () {
     return out.slice(-(end - Math.max(start, pad) + 1));
   }
 
+  /* 近期成交量的中位数 —— 用于估算流动性 / 冲击成本
+     注: 同一标的序列来自同一数据源, 故成交量单位自洽 */
+  function avgVol(code, n) {
+    n = n || 60;
+    const end = S.idx, start = Math.max(0, end - n + 1);
+    const vals = [];
+    for (let i = start; i <= end; i++) {
+      const b = raw(code, i);
+      if (b && b.v > 0 && isFinite(b.v)) vals.push(b.v);
+    }
+    if (!vals.length) return 0;
+    vals.sort((a, b) => a - b);
+    return vals[Math.floor(vals.length / 2)];
+  }
+
   /* 周/月 K 聚合 */
-  function agg(code, unit, count, end) {
-    end = end === undefined ? S.idx : end;
+  function agg(code, unit, count, end) {    end = end === undefined ? S.idx : end;
     const d = series(code, unit === 'week' ? (count + 1) * 5 : (count + 1) * 20, end);
     const out = [];
     let cur = null, curKey = '';
@@ -235,6 +295,76 @@ window.Market = (function () {
     }).catch(() => null);
   }
 
+  /* ---------- 在线: RSS 财经快讯 (CORS 中继, 失败则回退内置快照) ---------- */
+  const NEWS_FEEDS = [
+    { src: '东方财富', url: 'https://rss.eastmoney.com/rss_partener.xml' },
+    { src: 'CNBC', url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664' }
+  ];
+  /* 公共 CORS 中继 (纯前端静态站点无后端时的通用做法), 任一可用即可 */
+  const RELAYS = [
+    u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+    u => 'https://corsproxy.io/?' + encodeURIComponent(u)
+  ];
+
+  function parseFeed(txt, src, cap) {
+    const items = [];
+    const blockRe = /<(item|entry)[\s>][\s\S]*?<\/(?:item|entry)>/gi;
+    const blocks = txt.match(blockRe) || [];
+    blocks.forEach(b => {
+      const pick = tag => {
+        const m = b.match(new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)<\\/' + tag + '>', 'i'));
+        if (!m) return '';
+        return m[1]
+          .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+          .replace(/<[^>]+>/g, '')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+          .replace(/&amp;/g, '&')
+          .replace(/\s+/g, ' ').trim();
+      };
+      const t = pick('title');
+      if (!t) return;
+      let u = pick('link');
+      if (!u) {
+        const lm = b.match(/<link[^>]*href="([^"]+)"/i);
+        u = lm ? lm[1] : '';
+      }
+      items.push({ t, src, d: pick('pubDate') || pick('updated'), u });
+    });
+    return items.slice(0, cap);
+  }
+
+  let newsTried = false;
+  function fetchNews(force) {
+    if (newsTried && !force) return Promise.resolve(S.news.length);
+    newsTried = true;
+    const jobs = [];
+    NEWS_FEEDS.forEach(f => {
+      RELAYS.forEach(mk => {
+        jobs.push(
+          get(mk(f.url)).then(txt => parseFeed(txt.replace(/^\uFEFF/, ''), f.src, 60))
+            .catch(() => [])
+        );
+      });
+    });
+    return Promise.all(jobs).then(rs => {
+      /* 按来源去重, 保留条目最多的那份中继结果 */
+      const best = {};
+      rs.forEach(items => {
+        if (!items.length) return;
+        const src = items[0].src;
+        if (!best[src] || items.length > best[src].length) best[src] = items;
+      });
+      const merged = [];
+      Object.keys(best).forEach(k => merged.push.apply(merged, best[k]));
+      if (merged.length >= 5) {
+        S.news = merged;
+        S.newsFetchedAt = Date.now();
+      }
+      return S.news.length;
+    });
+  }
+
   /* ---------- 离线: 由 OHLC 还原当日分时走势 ---------- */
   function hashSeed(str) {
     let h = 2166136261;
@@ -297,10 +427,11 @@ window.Market = (function () {
         if (i >= S.dates.length - 1 || true) {
           const b = i * 5;
           for (let k = arr.length; k <= b + 4; k++) arr[k] = 0;
-          arr[b] = Math.round(parseFloat(r[1]) * 100);
-          arr[b + 1] = Math.round(parseFloat(r[3]) * 100);
-          arr[b + 2] = Math.round(parseFloat(r[4]) * 100);
-          arr[b + 3] = Math.round(parseFloat(r[2]) * 100);
+          const sc = scaleOf(code);
+          arr[b] = Math.round(parseFloat(r[1]) * sc);
+          arr[b + 1] = Math.round(parseFloat(r[3]) * sc);
+          arr[b + 2] = Math.round(parseFloat(r[4]) * sc);
+          arr[b + 3] = Math.round(parseFloat(r[2]) * sc);
           arr[b + 4] = Math.round(parseFloat(r[5]));
         }
       });
@@ -313,13 +444,44 @@ window.Market = (function () {
     return b ? b.c : 0;
   }
 
+  /* ---------- 品类判定 / 元信息 ---------- */
+  function metaOf(code) { return S.byCode[code] || null; }
+  function isCB(code) { return !!S.cbSet[code]; }
+  function isRepo(code) { const m = S.byCode[code]; return !!m && m.market === 'rp'; }
+  function isWealth(code) { const m = S.byCode[code]; return !!m && m.market === 'wm'; }
+  function scaleOf(code) { return S.scale[code] || 100; }
+  function listIdx(code) {
+    const v = S.listIdx[code];
+    return v === undefined ? -1 : v;
+  }
+  /* 当日除权事件 */
+  function dividendsOn(d) {
+    return S.divByDate[d === undefined ? date() : d] || [];
+  }
+  /* 查询某标的在给定日期区间的除权事件 */
+  function dividendsOf(code, fromIdx, toIdx) {
+    const from = fromIdx === undefined ? 0 : fromIdx;
+    const to = toIdx === undefined ? S.dates.length - 1 : toIdx;
+    const out = [];
+    for (let i = from; i <= to && i < S.dates.length; i++) {
+      const hit = S.divByDate[S.dates[i]];
+      if (!hit) continue;
+      for (const e of hit) if (e.c === code) out.push({ idx: i, d: e.d, s: e.s });
+    }
+    return out;
+  }
+
   return {
     S, init, raw, bar, prevClose, price, chg, series, agg,
     next, canNext, date, randomStart, setIdx,
-    fetchQuotes, fetchIntraday, fetchDaily, restored, benchLevel,
+    fetchQuotes, fetchIntraday, fetchDaily, restored, benchLevel, fetchNews,
+    metaOf, isCB, isRepo, isWealth, scaleOf, listIdx, avgVol,
+    dividendsOn, dividendsOf,
     get meta() { return S.meta; },
     get dates() { return S.dates; },
     get idx() { return S.idx; },
+    get divcal() { return S.divcal; },
+    get news() { return S.news; },
     get tradable() { return S.meta.filter(m => m.tradable); }
   };
 })();

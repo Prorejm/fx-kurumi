@@ -169,6 +169,66 @@
       if (ev === 'leverUp') {
         UI.tempFace('greedy', '杠杆 <b>' + d.v + 'x</b>……好、好！（颤抖）', 2600, 'av-bounce');
       }
+      /* ---- 理财类 ---- */
+      if (ev === 'repoBuy') {
+        UI.tempFace('idle', '借出去 ' + UI.money(d.amount) + ' 元，' + d.days + ' 天后回款。稳是稳，就是慢。', 2600);
+      }
+      if (ev === 'repoMature') {
+        UI.toast('✅ ' + d.name + ' 到期回款，利息 +' + UI.num(d.interest) + ' 元', 'ok');
+      }
+      if (ev === 'wealthBuy') {
+        UI.toast('已申购理财 ' + UI.money(d.amount) + ' · 净值会波动，不保本', 'warn');
+      }
+      if (ev === 'wealthRedeem') {
+        UI.toast((d.pnl >= 0 ? '💰 赎回盈利 +' : '📉 赎回亏损 ') + UI.money(d.pnl), d.pnl >= 0 ? 'ok' : 'bad');
+      }
+      if (ev === 'dcaSet') UI.toast('已设置定投：每 ' + d.every + ' 日 ' + UI.money(d.amount) + ' 元', 'ok');
+      if (ev === 'insureBuy') UI.tempFace('sad', '保险姓保……先有保障，再谈收益。', 3000);
+      if (ev === 'insureSurrender') {
+        UI.toast('已退保，损失 ' + UI.money(d.loss), 'warn');
+        UI.tempFace('sad', '退保了……现金价值和保费之间那道沟，就是流动性的代价。', 3200);
+      }
+      if (ev === 'pensionPay') {
+        UI.toast('养老金缴费 ' + UI.money(d.amount) + ' · 个税抵扣 +' + UI.money(d.saved), 'ok');
+      }
+      if (ev === 'pensionOut') {
+        UI.toast('已支取养老金，退回税优 ' + UI.money(d.claw), 'warn');
+      }
+      /* ---- 可转债打新 ---- */
+      if (ev === 'cbApply') UI.toast('已信用申购 ' + d.lots + ' 手，等中签结果', 'ok');
+      if (ev === 'cbIpo') {
+        const up = d.ret >= 0;
+        UI.tempFace(up ? 'happy' : 'sad', up
+          ? '打新吃肉！首日 <b>+' + (d.ret * 100).toFixed(1) + '%</b> —— 这才是零风险的快乐♪'
+          : '破发了……首日 <b>' + (d.ret * 100).toFixed(1) + '%</b>，打新也不是白送的。',
+          3400, up ? 'av-pop' : 'av-shake');
+        UI.toast((up ? '🎉 中签盈利 +' : '💀 中签亏损 ') + UI.money(d.pnl), up ? 'ok' : 'bad');
+      }
+      if (ev === 'cbForfeit') {
+        UI.tempFace('panic', '中签了却没钱缴款……弃购是要进黑名单的！', 3400, 'av-shake');
+        UI.toast('⚠ 弃购第 ' + d.count + ' 次（满 ' + Game.CB_FORFEIT_MAX + ' 次将被禁购 6 个月）', 'bad');
+      }
+      /* ---- 分红 ---- */
+      if (ev === 'dividend') {
+        const m = Market.metaOf(d.code);
+        UI.toast('🎁 ' + (m ? m.name : '') + ' 派发现金红利 +' + UI.money(d.cash) + '（市值同步下调）', 'ok');
+      }
+      /* ---- 黑天鹅 ---- */
+      if (ev === 'swan') {
+        const bull = d.kind === 'bull';
+        UI.tempFace(d.face || (bull ? 'wide' : 'panic'),
+          bull ? '<b>' + d.name + '</b>……政策的风来了，别站错方向。'
+               : '<b>' + d.name + '</b>！历史没写这一段……盘面要变天了。',
+          5000, bull ? 'av-pop' : 'av-shake');
+        UI.toast((bull ? '📈 利好冲击：' : '📉 黑天鹅：') + d.name + ' · ' + d.days + ' 个交易日内生效', bull ? 'ok' : 'bad');
+      }
+      /* ---- 反身性 ---- */
+      if (ev === 'butterfly') {
+        UI.tempFace('panic', '市场<b>察觉</b>到你在抄历史了……这只票的走势开始偏离原路。', 4200, 'av-shake');
+      }
+      if (ev === 'shockBuy') {
+        UI.toast('⚠ 单子太大，冲击成本 ' + (d.slip * 100).toFixed(2) + '%', 'warn');
+      }
     });
     document.getElementById('fxBtn').onclick = () => location.reload();
 
@@ -214,6 +274,12 @@
     };
     tick();
     setInterval(tick, 15000);
+    /* RSS 快讯: 启动时刷新一次, 之后每 5 分钟尝试一次 (失败静默回退内置快讯) */
+    const newsTick = () => Market.fetchNews(true).then(n => {
+      if (n > 0) { UI.refreshNews(); }
+    }).catch(() => { });
+    newsTick();
+    setInterval(newsTick, 300000);
   }
 
   /* ---------- 入口 ---------- */
