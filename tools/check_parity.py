@@ -39,6 +39,7 @@ import sys
 # 1) 必须逐字节一致（新增共享内核 + 既有同源文件）
 STRICT_FILES = [
     "assets/js/i18n.js",
+    "assets/js/micro.js",
     "assets/js/market.js",
     "data/snapshot.js",
     "data/lang/zh.js",
