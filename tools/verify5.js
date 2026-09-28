@@ -456,7 +456,8 @@ const ck = (k, cond, extra) => {
     swanLogItems: document.querySelectorAll('#setBody .swan-item').length
   }));
   log('SET-UI', setUi);
-  ck('设置面板渲染 6 项开关', setUi.switches === 6, setUi.switches);
+  // 因新增 opt.micro 开关（第 7 个 .switch）而同步更新 6 → 7：仅计数期望值随产品意图变更，断言逻辑未改
+  ck('设置面板渲染 7 项开关', setUi.switches === 7, setUi.switches);
   ck('默认全部开启', setUi.defaultAllOn);
   ck('频率档位 5 档', setUi.lvBtns === 5, setUi.lvBtns);
   await p.screenshot({ path: OUT + '53-settings.png' });
