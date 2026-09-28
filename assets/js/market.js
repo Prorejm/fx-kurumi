@@ -35,10 +35,12 @@ window.Market = (function () {
 
   /* ---------- 初始化 ---------- */
   function init(snap) {
+    const ZONE = { main: 'A', gem: 'A', star: 'A', us: 'US', hk: 'HK', fx: 'FX', fd: 'FD' };
     S.meta = snap.m.map(a => ({
       code: a[0], name: a[1], ind: a[2],
       market: a[3], limitPct: a[4],
-      tradable: a[3] !== 'index'
+      tradable: a[3] !== 'index',
+      zone: a[3] === 'index' ? 'IDX' : (ZONE[a[3]] || 'A')
     })).filter(s => !S.seen_(s.code));
     S.dates = snap.d;
     S.series = snap.s;
@@ -56,9 +58,10 @@ window.Market = (function () {
     if (!arr) return null;
     const b = i * 5;
     if (b + 4 >= arr.length) return null;
+    const sc = code.indexOf('fx') === 0 ? 10000 : 100;
     return {
-      d: S.dates[i], o: arr[b] / 100, h: arr[b + 1] / 100,
-      l: arr[b + 2] / 100, c: arr[b + 3] / 100, v: arr[b + 4]
+      d: S.dates[i], o: arr[b] / sc, h: arr[b + 1] / sc,
+      l: arr[b + 2] / sc, c: arr[b + 3] / sc, v: arr[b + 4]
     };
   }
 

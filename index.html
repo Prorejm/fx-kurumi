@@ -129,9 +129,11 @@
       <i class="mb-line" style="left:20%"></i>
       <i class="mb-line" style="left:26%"></i>
     </div>
-    <div class="mb-right">
-      <span class="lev-chip" id="levChip">杠杆 1x</span>
-    </div>
+      <div class="mb-right">
+        <span class="lev-chip" id="levChip">杠杆 1x</span>
+        <span class="debt-chip hidden" id="debtChip"></span>
+        <span class="cash-chip hidden" id="cashChip"></span>
+      </div>
   </div>
 
   <!-- 三栏主体 -->
@@ -144,6 +146,13 @@
         <span class="hd-tools">
           <button class="mini-btn" id="sortBtn" title="切换排序">⇅</button>
         </span>
+      </div>
+      <div class="zone-tabs" id="zoneTabs">
+        <button class="ztab active" data-zone="A">A股</button>
+        <button class="ztab" data-zone="HK">港股</button>
+        <button class="ztab" data-zone="US">美股</button>
+        <button class="ztab" data-zone="FX">外汇</button>
+        <button class="ztab" data-zone="FD">基金</button>
       </div>
       <div class="search-box">
         <input type="text" id="searchInput" placeholder="搜代码 / 名称 / 行业，如 茅台">
@@ -182,6 +191,10 @@
 
       <!-- 交易面板 -->
       <div class="trade-panel">
+        <div class="dir-tabs" id="dirTabs">
+          <button class="dtab active" data-dir="long">做多 ▲</button>
+          <button class="dtab" data-dir="short">做空 ▼</button>
+        </div>
         <div class="tp-left">
           <div class="tp-row">
             <span class="tp-label">价格</span>
@@ -213,8 +226,8 @@
           </div>
         </div>
         <div class="tp-right">
-          <button class="btn btn-buy" id="buyBtn"><b>买 入</b><span id="buySub">可用 ¥0</span></button>
-          <button class="btn btn-sell" id="sellBtn"><b>卖 出</b><span id="sellSub">可卖 0 股</span></button>
+          <button class="btn btn-buy" id="buyBtn"><b class="buy-label">买 入</b><span id="buySub">可用 ¥0</span></button>
+          <button class="btn btn-sell" id="sellBtn"><b class="sell-label">卖 出</b><span id="sellSub">可卖 0 股</span></button>
         </div>
       </div>
     </section>
@@ -260,8 +273,11 @@
         <button class="btn btn-time" id="autoBtn">自动 ▶</button>
       </div>
       <div class="ctrl-btns">
-        <button class="btn btn-ghost sm" id="leverBtn">调杠杆</button>
-        <button class="btn btn-ghost sm" id="restartBtn">重开</button>
+        <button class="btn btn-ghost sm" id="leverBtn" title="调整杠杆">杠杆</button>
+        <button class="btn btn-ghost sm" id="loanBtn" title="融资 · 信用 · 借贷中心">借贷</button>
+        <button class="btn btn-ghost sm" id="lbBtn" title="排行榜">榜单</button>
+        <button class="btn btn-ghost sm" id="lawBtn" title="金融普法">普法</button>
+        <button class="btn btn-ghost sm" id="restartBtn" title="重新开始">重开</button>
       </div>
       <div class="stats-mini" id="statsMini"></div>
     </div>
@@ -293,6 +309,47 @@
       <div class="lever-ticks"><span>1x</span><span>2x</span><span>3x</span><span>5x</span><span>10x</span><span>25x</span><span class="fx">FX</span></div>
     </div>
     <div class="intro-btns"><button class="btn btn-primary" id="levOk">确 定</button></div>
+  </div>
+</div>
+
+<!-- ===== 融资 · 信用 · 借贷中心 ===== -->
+<div id="loanModal" class="modal-wrap hidden">
+  <div class="modal comic-box lmodal">
+    <button class="modal-x" data-close="loanModal">×</button>
+    <h2 class="big-title sm">融资 · 信用 · 借贷中心</h2>
+    <div class="ltabs" id="loanTabs">
+      <button class="ltab active" data-lt="credit">信用 · 负债</button>
+      <button class="ltab" data-lt="bank">正规融资</button>
+      <button class="ltab" data-lt="asset">资产抵押</button>
+      <button class="ltab" data-lt="consumer">花呗 · 借呗 · 信用卡</button>
+      <button class="ltab" data-lt="friend">亲友借款</button>
+      <button class="ltab danger" data-lt="ill">高利贷 · 网贷 ⚠</button>
+    </div>
+    <div class="lbody" id="loanBody"></div>
+  </div>
+</div>
+
+<!-- ===== 排行榜 ===== -->
+<div id="lbModal" class="modal-wrap hidden">
+  <div class="modal comic-box lmodal">
+    <button class="modal-x" data-close="lbModal">×</button>
+    <h2 class="big-title sm">战绩排行榜</h2>
+    <div class="lb-actions">
+      <button class="btn btn-primary sm" id="lbRecord">记录本次成绩</button>
+      <button class="btn btn-ghost sm" id="lbClear">清空榜</button>
+      <span class="lb-hint">按收益率排名 · 前 50 名</span>
+    </div>
+    <div class="lbody" id="lbBody"></div>
+  </div>
+</div>
+
+<!-- ===== 金融普法 ===== -->
+<div id="lawModal" class="modal-wrap hidden">
+  <div class="modal comic-box lmodal">
+    <button class="modal-x" data-close="lawModal">×</button>
+    <h2 class="big-title sm">金融普法 · 风险警示</h2>
+    <p class="law-lead">本作中出现的杠杆、借款、催收均为<b>模拟演示</b>。以下内容依据我国现行法律法规整理，供学习参考，不构成法律意见。</p>
+    <div class="lbody" id="lawBody"></div>
   </div>
 </div>
 

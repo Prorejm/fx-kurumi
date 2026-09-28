@@ -10,7 +10,7 @@ window.UI = (function () {
     code: '', view: 'kline', bars: 90, offset: 0,
     sort: 'chg', filter: '', rows: {}, posRows: {},
     tempFace: null, faceTimer: 0, lastFace: '', layout: null,
-    auto: null, curBarsCache: null
+    auto: null, curBarsCache: null, zone: 'A', direction: 'long'
   };
 
   function num(v, d) { return (+v || 0).toFixed(d === undefined ? 2 : d); }
@@ -26,14 +26,17 @@ window.UI = (function () {
   function cache() {
     ['app', 'intro', 'boot', 'bootBar', 'sEquity', 'sReturn', 'sAvail', 'sMktVal', 'sPnl',
       'charAvatar', 'charBubble', 'introAvatar', 'introLine', 'modeBadge', 'dateBadge', 'liveDot',
-      'mbVal', 'mbFill', 'levChip', 'marginBar', 'stockList', 'posList', 'logList', 'badges',
+      'mbVal', 'mbFill', 'levChip', 'marginBar', 'debtChip', 'cashChip', 'stockList', 'posList', 'logList', 'badges',
       'curName', 'curCode', 'curPrice', 'curChg', 'curOpen', 'curHigh', 'curLow', 'curPrev', 'curTurn',
       'indexStrip', 'kchart', 'equityChart', 'crosshair', 'priceInput', 'qtyInput',
       'calcAmt', 'calcFee', 'calcMargin', 'buyBtn', 'sellBtn', 'buySub', 'sellSub',
       'searchInput', 'sortBtn', 'nextDayBtn', 'next5Btn', 'autoBtn', 'leverBtn', 'restartBtn',
       'closeAllBtn', 'clearLog', 'posCount', 'addFill', 'addTxt', 'statsMini', 'toast',
       'fx', 'fxAvatar', 'fxWord', 'fxSub', 'fxBtn', 'startBtn', 'continueBtn',
-      'introLev', 'introLevVal', 'levModal', 'levSlider', 'levVal', 'levOk'
+      'introLev', 'introLevVal', 'levModal', 'levSlider', 'levVal', 'levOk',
+      'loanBtn', 'loanModal', 'loanTabs', 'loanBody',
+      'lbBtn', 'lbModal', 'lbBody', 'lbRecord', 'lbClear',
+      'lawBtn', 'lawModal', 'lawBody'
     ].forEach(id => { el[id] = document.getElementById(id); });
     el.chartWrap = $('.chart-wrap');
     el.crosshair = document.getElementById('crosshair');
@@ -79,6 +82,7 @@ window.UI = (function () {
     el.stockList.innerHTML = '';
     const q = S.filter.trim().toLowerCase();
     let list = Market.tradable;
+    if (S.zone && S.zone !== 'ALL') list = list.filter(m => m.zone === S.zone);
     if (q) list = list.filter(m =>
       m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q) ||
       (m.ind || '').toLowerCase().includes(q));
@@ -148,10 +152,12 @@ window.UI = (function () {
       const meta = Market.meta.find(m => m.code === p.code) || { name: p.code, ind: '' };
       const pr = Market.price(p.code);
       const mv = pr * p.shares, cost = p.cost * p.shares;
-      const pnl = mv - cost, r = cost ? pnl / cost * 100 : 0;
+      const pnl = (p.side === 'short') ? (p.cost - pr) * p.shares : (pr - p.cost) * p.shares;
+      const r = cost ? pnl / cost * 100 : 0;
       const can = Game.canSellShares(p.code);
+      const sideTag = `<i class="side-tag ${p.side}">${p.side === 'short' ? '空' : '多'}</i>`;
       return `<div class="prow ${p.code === S.code ? 'on' : ''}" data-code="${p.code}">
-        <div class="r1"><b>${meta.name}</b><em>${p.shares}股${can < p.shares ? ' (T+1冻结)' : ''}</em>
+        <div class="r1"><b>${meta.name}</b>${sideTag}<em>${p.shares}股${can < p.shares ? ' (T+1冻结)' : ''}</em>
           <span class="${cls(pnl)}">${pct(r)}</span></div>
         <div class="r2">
           <div><span>成本</span><b>${num(p.cost)}</b></div>
@@ -232,6 +238,27 @@ window.UI = (function () {
     el.buySub.textContent = '可用 ' + money(s.avail);
     const p = Game.pos(S.code);
     el.sellSub.textContent = '可卖 ' + (p ? Game.canSellShares(S.code) : 0) + ' 股';
+
+    /* 质押负债 / 民间借贷 / 信用 / 现金理财 */
+    if (el.debtChip) {
+      const parts = [];
+      if (s.debtTotal > 0) parts.push('负债 ' + money(s.debtTotal) +
+        ' · 日息 ' + money(s.debtTotal * (s.loanRate / 252)));
+      if (s.illDebt > 0) parts.push('⚠民间借贷 ' + money(s.illDebt));
+      if (s.civDebt > 0) parts.push('信贷/亲友 ' + money(s.civDebt));
+      if (s.creditBad) parts.push('失信 ' + Math.round(s.credit) + '分');
+      if (parts.length) {
+        el.debtChip.classList.remove('hidden');
+        el.debtChip.classList.toggle('danger-chip', s.illDebt > 0 || s.civDebt > 0 || s.creditBad);
+        el.debtChip.textContent = parts.join(' | ');
+      } else el.debtChip.classList.add('hidden');
+    }
+    if (el.cashChip) {
+      if (s.cashFund) {
+        el.cashChip.classList.remove('hidden');
+        el.cashChip.textContent = '理财 ON · 日息 ' + money(Math.max(0, s.avail) * (0.02 / 252));
+      } else el.cashChip.classList.add('hidden');
+    }
   }
 
   function renderFoot() {
@@ -347,10 +374,13 @@ window.UI = (function () {
   function doBuy() {
     const price = parseFloat(el.priceInput.value) || 0;
     const qty = parseInt(el.qtyInput.value, 10) || 0;
-    const r = Game.buy(S.code, price, qty);
+    const r = Game.buy(S.code, price, qty, S.direction);
     toast(r.msg, r.ok ? 'ok' : 'bad');
     if (r.ok) {
-      tempFace('eager', '买进了！这只是开始……', 2200, 'av-pop');
+      if (S.direction === 'short')
+        tempFace('greedy', '空单开好了！跌下来就是利润～', 2200, 'av-pop');
+      else
+        tempFace('eager', '买进了！这只是开始……', 2200, 'av-pop');
       Game.checkBadges();
     }
     refreshAll();
@@ -363,12 +393,29 @@ window.UI = (function () {
     if (r.ok) {
       const t = Game.G.trades[Game.G.trades.length - 1];
       const won = t && t.pnl >= 0;
+      const shortClose = t && t.side === 'S_CLOSE';
       tempFace(won ? 'happy' : 'sad',
-        won ? '赚到了！这个感觉……还想再来一次♪' : '呜呜……本金又少了一块……',
+        won ? (shortClose ? '空单收割成功！这波跌得漂亮～' : '赚到了！这个感觉……还想再来一次♪')
+            : '呜呜……本金又少了一块……',
         2400, won ? 'av-pop' : 'av-shake');
       Game.checkBadges();
     }
     refreshAll();
+  }
+
+  function updateDirUI() {
+    document.querySelectorAll('.dtab').forEach(t => {
+      t.classList.toggle('active', t.dataset.dir === S.direction);
+    });
+    const bl = el.buyBtn && el.buyBtn.querySelector('.buy-label');
+    const sl = el.sellBtn && el.sellBtn.querySelector('.sell-label');
+    if (S.direction === 'short') {
+      if (bl) bl.textContent = '卖 空 开 仓';
+      if (sl) sl.textContent = '买 回 平 仓';
+    } else {
+      if (bl) bl.textContent = '买 入';
+      if (sl) sl.textContent = '卖 出';
+    }
   }
 
   /* ---------------- 全量刷新 ---------------- */
@@ -410,6 +457,261 @@ window.UI = (function () {
     el.fx.classList.remove('hidden');
   }
   function hideFx() { el.fx.classList.add('hidden'); }
+
+  /* ================= 融资 · 信用 · 借贷中心 ================= */
+  let loanTab = 'credit';
+  function openModal(id) { const m = el[id]; if (m) m.classList.remove('hidden'); }
+  function closeModal(id) { const m = el[id]; if (m) m.classList.add('hidden'); }
+
+  const pctOf = v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+
+  function civRow(l, i) {
+    return `<div class="ill-row">
+      <span>${l.icon} ${l.name}${l.overdue ? ' <em class="od">已逾期</em>' : ''}</span>
+      <b class="${l.overdue ? 'down' : ''}">${money(l.owed)}</b>
+      <input class="civRepayAmt" data-i="${i}" type="number" step="1000" value="0" placeholder="还款">
+      <button class="btn btn-ghost sm civRepay" data-i="${i}">还款</button></div>`;
+  }
+
+  function renderLoan() {
+    if (!el.loanBody) return;
+    const s = Game.summary();
+    document.querySelectorAll('.ltab').forEach(t => t.classList.toggle('active', t.dataset.lt === loanTab));
+    let h = '';
+
+    if (loanTab === 'credit') {
+      const c = Math.round(s.credit);
+      const band = c >= 700 ? 'good' : (c >= Game.CREDIT_BAD ? 'mid' : 'bad');
+      const bandTxt = band === 'good' ? '良好' : band === 'mid' ? '一般' : '失信';
+      h += `<div class="credit-card ${band}">
+        <div class="cc-score"><span>信用分</span><b>${c}</b><em>${bandTxt}</em>
+          <div class="cc-bar"><i style="width:${Math.max(0, Math.min(100, (c - 300) / 5.5))}%"></i></div>
+        </div>
+        <div class="cc-meta">
+          <div><span>正规负债(质押+抵押)</span><b class="${s.debtTotal > 0 ? 'down' : ''}">${money(s.debtTotal)}</b></div>
+          <div><span>可质押额度</span><b>${money(s.loanAvail)}</b></div>
+          <div><span>资产可抵押额度</span><b>${money(s.mortAvail)}</b></div>
+          <div><span>民间借贷欠款</span><b class="${s.illDebt > 0 ? 'down' : ''}">${money(s.illDebt)}</b></div>
+          <div><span>消费信贷欠款</span><b class="${s.civDebt > 0 ? 'down' : ''}">${money(s.civDebt)}</b></div>
+          <div><span>总负债</span><b class="${s.totalDebt > 0 ? 'down' : ''}">${money(s.totalDebt)}</b></div>
+          <div><span>人情 / 关系</span><b class="${s.relation < 40 ? 'down' : ''}">${Math.round(s.relation)}</b></div>
+          <div><span>累计被催收</span><b class="${Game.G.illCollected > 0 ? 'down' : ''}">${Game.G.illCollected} 次</b></div>
+          <div><span>当前杠杆</span><b>${Game.G.leverage}x</b></div>
+        </div>
+      </div>`;
+      const cb = Game.creditBlocked();
+      if (cb) h += `<div class="warn-bar big">⚠ 高消费限制已生效<span>${cb}</span></div>`;
+      h += `<div class="mini-note">信用分低于 ${Game.CREDIT_BAD} 触发失信惩戒：无法新开仓、无法新增借款。按时还款、降低负债率可逐步修复（负债清零时每日 +1）。</div>`;
+    }
+
+    if (loanTab === 'bank') {
+      const rate = (Game.LOAN_RATE * 100).toFixed(0);
+      h += `<div class="loan-sec">
+        <div class="ls-hd">质押贷款 <span class="tag">正规 · 券商两融</span></div>
+        <div class="ls-desc">以持仓市值质押借入现金，年化约 ${rate}%，按日计息。负债 ÷ 持仓市值低于 100% 将被强制平仓还贷。</div>
+        <div class="ls-row">
+          <div><span>可贷额度</span><b>${money(s.loanAvail)}</b></div>
+          <div><span>当前负债</span><b>${money(s.debtTotal)}</b></div>
+          <div><span>持仓市值</span><b>${money(s.mv)}</b></div>
+        </div>
+        <div class="ls-input">
+          <input id="loanAmt" type="number" step="10000" value="0" placeholder="金额（元）">
+          <button class="btn btn-primary sm" id="loanDoPledge">借入</button>
+          <button class="btn btn-ghost sm" id="loanDoRepay">还款</button>
+        </div>
+      </div>
+      <div class="loan-sec">
+        <div class="ls-hd">现金理财 <span class="tag ${s.cashFund ? 'on' : ''}">${s.cashFund ? '已开启' : '已关闭'}</span></div>
+        <div class="ls-desc">闲置资金自动买入货币基金，年化约 ${(Game.FUND_RATE * 100).toFixed(0)}%，按日计息，随时可用。</div>
+        <button class="btn ${s.cashFund ? 'btn-ghost' : 'btn-primary'} sm" id="loanToggleFund">${s.cashFund ? '关闭理财' : '开启理财'}</button>
+      </div>`;
+    }
+
+    if (loanTab === 'asset') {
+      h += `<div class="mini-note">固定资产抵押：抵押率 ${(Game.MORT_LTV * 100).toFixed(0)}%，年化 ${(Game.MORT_RATE * 100).toFixed(0)}%。抵押金额计入总负债，利息按日累计。抵押资产在失信/极端催收下可能被强制处置。</div>`;
+      (s.assets || []).forEach(a => {
+        const avail = Math.max(0, a.value * Game.MORT_LTV - a.mort);
+        h += `<div class="asset-card">
+          <div class="ac-hd">${a.icon} ${a.name}</div>
+          <div class="ac-meta"><span>估值 ${money(a.value, true)}</span><span>已抵押 ${money(a.mort)}</span><span>可抵押 <b>${money(avail)}</b></span></div>
+          <div class="ls-input">
+            <input class="assetAmt" data-id="${a.id}" type="number" step="10000" value="0" placeholder="金额（元）">
+            <button class="btn btn-primary sm assetMort" data-id="${a.id}">抵押借入</button>
+            <button class="btn btn-ghost sm assetRedeem" data-id="${a.id}">赎楼还款</button>
+          </div></div>`;
+      });
+    }
+
+    if (loanTab === 'consumer') {
+      h += `<div class="mini-note">持牌消费信贷：合法，但年化普遍 16%–18%。花呗有免息期，借呗随借随还，信用卡取现按月复利且无免息期。逾期会<b>上报征信</b>。</div>`;
+      Game.CONSUMER_CREDIT.forEach(p => {
+        const apr = (p.compound ? (Math.pow(1 + p.daily, 365) - 1) : p.daily * 365) * 100;
+        h += `<div class="cc-card">
+          <div class="ic-hd">${p.icon} ${p.name} <span class="ic-apr">年化≈${apr.toFixed(1)}%</span></div>
+          <div class="ic-desc">${p.desc}</div>
+          <div class="ic-law">⚖ ${p.law}</div>
+          <div class="ls-input">
+            <input class="civAmt" data-id="${p.id}" type="number" step="1000" value="0" placeholder="金额（上限 ${money(p.limit)}）">
+            <button class="btn btn-primary sm civDo" data-id="${p.id}">借入</button>
+          </div></div>`;
+      });
+      const mine = (s.civLoans || []).map((l, i) => ({ l, i })).filter(x => x.l.kind === 'consumer');
+      if (mine.length) {
+        h += `<div class="loan-sec"><div class="ls-hd">我的消费信贷欠款</div>`;
+        mine.forEach(x => { h += civRow(x.l, x.i); });
+        h += `<div class="mini-note">按时还款可修复征信；逾期扣信用分并影响后续借贷。</div></div>`;
+      }
+    }
+
+    if (loanTab === 'friend') {
+      const rel = Math.round(s.relation);
+      const rc = rel >= 70 ? 'good' : rel >= 40 ? 'mid' : 'bad';
+      h += `<div class="credit-card ${rc}">
+        <div class="cc-score"><span>人情 / 关系</span><b>${rel}</b>
+          <em>${rel >= 70 ? '铁哥们' : rel >= 40 ? '一般' : '快凉了'}</em>
+          <div class="cc-bar"><i style="width:${Math.max(0, Math.min(100, rel))}%"></i></div></div>
+        <div class="mini-note" style="margin:0">亲友借款不收利息，但每拖一天都在消耗人情。按时还款——关系会更铁。</div>
+      </div>`;
+      Game.FRIEND_LOANS.forEach(p => {
+        h += `<div class="friend-card">
+          <div class="ic-hd">${p.icon} ${p.name} <span class="ic-apr">无息 · 人情 ${p.trust}</span></div>
+          <div class="ic-desc">${p.desc}</div>
+          <div class="ic-law">⚖ ${p.law}</div>
+          <div class="ls-input">
+            <input class="civAmt" data-id="${p.id}" type="number" step="1000" value="0" placeholder="金额（上限 ${money(p.limit)}）">
+            <button class="btn btn-primary sm civDo" data-id="${p.id}">开口借</button>
+          </div></div>`;
+      });
+      const mine2 = (s.civLoans || []).map((l, i) => ({ l, i })).filter(x => x.l.kind === 'friend');
+      if (mine2.length) {
+        h += `<div class="loan-sec"><div class="ls-hd">欠亲友的钱</div>`;
+        mine2.forEach(x => { h += civRow(x.l, x.i); });
+        h += `<div class="mini-note">亲友的钱最好借也最难还——还的是情分。趁早还，别把关系拖没了。</div></div>`;
+      }
+    }
+
+    if (loanTab === 'ill') {
+      h += `<div class="warn-bar big">⚠ 以下为<b>非法 / 不受法律保护</b>的借贷产品，仅作普法演示<span>年化远超一年期 LPR 四倍（约 13.8%）。“砍头息”“利滚利”“爆通讯录”均属违法，请勿在现实中触碰。</span></div>`;
+      Game.ILLEGAL_LOANS.forEach(p => {
+        const apr = (p.compound ? (Math.pow(1 + p.daily, 365) - 1) : p.daily * 365) * 100;
+        h += `<div class="ill-card">
+          <div class="ic-hd">${p.icon} ${p.name} <span class="ic-apr">年化≈${apr.toFixed(0)}%</span></div>
+          <div class="ic-desc">${p.desc}</div>
+          <div class="ic-law">⚖ ${p.law}</div>
+          <div class="ls-input">
+            <input class="illAmt" data-id="${p.id}" type="number" step="10000" value="0" placeholder="想借多少">
+            <button class="btn btn-ill sm illDo" data-id="${p.id}">我要借 ⚠</button>
+          </div></div>`;
+      });
+      if (s.illLoans && s.illLoans.length) {
+        h += `<div class="loan-sec"><div class="ls-hd">我的民间借贷欠款</div>`;
+        s.illLoans.forEach((l, i) => {
+          h += `<div class="ill-row">
+            <span>${l.icon} ${l.name}${l.overdue ? ' <em class="od">已逾期</em>' : ''}</span>
+            <b class="down">${money(l.owed)}</b>
+            <input class="illRepayAmt" data-i="${i}" type="number" step="10000" value="0" placeholder="还款">
+            <button class="btn btn-ghost sm illRepay" data-i="${i}">还款</button></div>`;
+        });
+        h += `<div class="mini-note">欠款按日累加，逾期触发催收：短信轰炸 → 爆通讯录 → 上门并强制处置财产。及时还款、尽快上岸是唯一出路。</div></div>`;
+      }
+    }
+    el.loanBody.innerHTML = h;
+    bindLoanBody();
+  }
+
+  function bindLoanBody() {
+    const q = id => el.loanBody.querySelector('#' + id);
+    const g = id => q(id);
+    if (g('loanDoPledge')) g('loanDoPledge').onclick = () => {
+      const r = Game.pledge(+g('loanAmt').value || 0); toast(r.msg, r.ok ? 'ok' : 'bad');
+      if (r.ok) { renderLoan(); refreshAll(); }
+    };
+    if (g('loanDoRepay')) g('loanDoRepay').onclick = () => {
+      const r = Game.repay(+g('loanAmt').value || 0); toast(r.msg, r.ok ? 'ok' : 'bad');
+      if (r.ok) { renderLoan(); refreshAll(); }
+    };
+    if (g('loanToggleFund')) g('loanToggleFund').onclick = () => { Game.setCashFund(!Game.G.cashFund); renderLoan(); refreshAll(); };
+
+    el.loanBody.querySelectorAll('.assetMort').forEach(b => b.onclick = () => {
+      const id = b.dataset.id;
+      const inp = el.loanBody.querySelector('.assetAmt[data-id="' + id + '"]');
+      const r = Game.mortgage(id, +inp.value || 0); toast(r.msg, r.ok ? 'ok' : 'bad');
+      if (r.ok) { renderLoan(); refreshAll(); }
+    });
+    el.loanBody.querySelectorAll('.assetRedeem').forEach(b => b.onclick = () => {
+      const id = b.dataset.id;
+      const inp = el.loanBody.querySelector('.assetAmt[data-id="' + id + '"]');
+      const r = Game.redeem(id, +inp.value || 0); toast(r.msg, r.ok ? 'ok' : 'bad');
+      if (r.ok) { renderLoan(); refreshAll(); }
+    });
+    el.loanBody.querySelectorAll('.illDo').forEach(b => b.onclick = () => {
+      const id = b.dataset.id;
+      const p = Game.ILLEGAL_LOANS.find(x => x.id === id);
+      const inp = el.loanBody.querySelector('.illAmt[data-id="' + id + '"]');
+      if (!window.confirm('⚠ 这是违法借贷！\n\n' + p.desc + '\n\n法律提示：' + p.law + '\n\n本作仅为普法演示，确定要借吗？')) return;
+      const r = Game.borrowIllegal(id, +inp.value || 0); toast(r.msg, r.ok ? 'warn' : 'bad');
+      if (r.ok) { tempFace('panic', '别借啊……这种东西会连本带利吃掉你的。', 3200, 'av-shake'); renderLoan(); refreshAll(); }
+    });
+    el.loanBody.querySelectorAll('.illRepay').forEach(b => b.onclick = () => {
+      const i = +b.dataset.i;
+      const inp = el.loanBody.querySelector('.illRepayAmt[data-i="' + i + '"]');
+      const r = Game.repayIllegal(i, +inp.value || 0); toast(r.msg, r.ok ? 'ok' : 'bad');
+      if (r.ok) { renderLoan(); refreshAll(); }
+    });
+    /* 花呗/借呗/信用卡 + 亲友借款 */
+    el.loanBody.querySelectorAll('.civDo').forEach(b => b.onclick = () => {
+      const id = b.dataset.id;
+      const inp = el.loanBody.querySelector('.civAmt[data-id="' + id + '"]');
+      const r = Game.borrowCivil(id, +inp.value || 0); toast(r.msg, r.ok ? 'ok' : 'bad');
+      if (r.ok) { renderLoan(); refreshAll(); }
+    });
+    el.loanBody.querySelectorAll('.civRepay').forEach(b => b.onclick = () => {
+      const i = +b.dataset.i;
+      const inp = el.loanBody.querySelector('.civRepayAmt[data-i="' + i + '"]');
+      const r = Game.repayCivil(i, +inp.value || 0); toast(r.msg, r.ok ? 'ok' : 'bad');
+      if (r.ok) { renderLoan(); refreshAll(); }
+    });
+  }
+
+  function openLoanModal() { openModal('loanModal'); renderLoan(); refreshAll(); }
+
+  /* ================= 排行榜 ================= */
+  function renderLb() {
+    if (!el.lbBody) return;
+    const list = Game.getLeaderboard();
+    const s = Game.summary();
+    let h = `<div class="lb-self">本次：收益率 <b class="${cls(s.returnPct)}">${pctOf(s.returnPct)}</b>
+      · 净资产 ${money(s.equity, true)} · ${Game.G.mode === 'live' ? '实盘同步' : '历史回放'} · 杠杆 ${Game.G.leverage}x</div>`;
+    if (!list.length) h += `<div class="empty">还没有任何记录。<br>点「记录本次成绩」上榜。</div>`;
+    else {
+      h += `<div class="lb-table">`;
+      list.forEach((e, i) => {
+        const mc = e.ret > 0 ? 'up' : (e.ret < 0 ? 'down' : 'flat');
+        const rk = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
+        h += `<div class="lb-row ${e.name === '你' ? 'me' : ''}">
+          <span class="rk">${rk}</span><b>${e.name}</b>
+          <span class="${mc}">${(e.ret >= 0 ? '+' : '') + e.ret.toFixed(2)}%</span>
+          <em>${money(e.equity, true)} · ${e.lev}x · ${e.days}天 · ${e.date}</em></div>`;
+      });
+      h += `</div>`;
+    }
+    el.lbBody.innerHTML = h;
+  }
+  function openLbModal() { openModal('lbModal'); renderLb(); }
+
+  /* ================= 金融普法 ================= */
+  function renderLaw() {
+    if (!el.lawBody) return;
+    let h = `<div class="law-warn">⚖ 非法借贷的法律定性（本作仅为演示，切勿模仿）</div>`;
+    Game.ILLEGAL_LOANS.forEach(p => {
+      h += `<div class="law-card ill"><b>${p.icon} ${p.name}</b><p>${p.law}</p></div>`;
+    });
+    h += `<div class="law-warn">📖 金融法律常识</div><div class="law-grid">`;
+    (Game.LEGAL_TIPS || []).forEach(t => { h += `<div class="law-card"><b>${t.t}</b><p>${t.b}</p></div>`; });
+    h += `</div>`;
+    el.lawBody.innerHTML = h;
+  }
+  function openLawModal() { openModal('lawModal'); renderLaw(); }
 
   function bind(map) {
     cache();
@@ -509,6 +811,35 @@ window.UI = (function () {
     };
     el.restartBtn.onclick = () => location.reload();
 
+    /* 分区标签 */
+    document.querySelectorAll('.ztab').forEach(t => {
+      t.addEventListener('click', () => {
+        S.zone = t.dataset.zone;
+        document.querySelectorAll('.ztab').forEach(x => x.classList.toggle('active', x === t));
+        buildWatch();
+      });
+    });
+    /* 多空切换 */
+    document.querySelectorAll('.dtab').forEach(t => {
+      t.addEventListener('click', () => {
+        S.direction = t.dataset.dir;
+        updateDirUI();
+      });
+    });
+    updateDirUI();
+
+    /* 融资 / 借贷 / 排行榜 / 普法 弹窗 */
+    el.loanBtn.onclick = openLoanModal;
+    document.querySelectorAll('.ltab').forEach(t => t.onclick = () => { loanTab = t.dataset.lt; renderLoan(); });
+    el.lbBtn.onclick = openLbModal;
+    if (el.lbRecord) el.lbRecord.onclick = () => { Game.recordRun('你'); renderLb(); toast('已记录本次成绩', 'ok'); };
+    if (el.lbClear) el.lbClear.onclick = () => { Game.clearLeaderboard(); renderLb(); toast('排行榜已清空', 'warn'); };
+    el.lawBtn.onclick = openLawModal;
+    document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => closeModal(b.dataset.close));
+    ['loanModal', 'lbModal', 'lawModal'].forEach(id => {
+      const m = el[id]; if (m) m.addEventListener('click', e => { if (e.target === m) closeModal(id); });
+    });
+
     window.addEventListener('resize', () => { drawChart(); drawEquity(); });
     return map;
   }
@@ -519,6 +850,7 @@ window.UI = (function () {
     if (!moved) {
       toast('已经走到数据尽头，游戏结束', 'warn');
       const s = Game.summary();
+      if (!Game.G._recorded) { Game.G._recorded = true; Game.recordRun('你'); }
       Game.G._lastWords = Char.lineForState('zen');
       showFx(s.returnPct >= 0 ? 'smug' : 'broken',
         '结 算',
@@ -547,6 +879,7 @@ window.UI = (function () {
   return {
     bind, toast, refreshAll, select, buildWatch, updateWatch, renderPos, renderLog,
     renderTop, renderHud, renderFoot, drawChart, drawEquity, setFace, tempFace,
-    refreshFace, showFx, hideFx, syncCalc, fillPrice, S, el, money, pct, cls, num
+    refreshFace, showFx, hideFx, syncCalc, fillPrice, S, el, money, pct, cls, num,
+    openLoanModal, openLbModal, openLawModal, renderLoan, renderLb, renderLaw, closeModal
   };
 })();

@@ -124,9 +124,38 @@
            <span style="font-size:13px">再来一次？这次记得看维持率。</span>`, '重 新 开 始');
       }
       if (ev === 'ruin') {
+        if (!Game.G._recorded) { Game.G._recorded = true; Game.recordRun('你'); }
         UI.showFx('dead', '退 場',
-          `本金归零。<br>你被市场的巨齿碾碎了。<br>
-           <span style="font-size:13px">最终成就：中毒度 ${Math.round(Game.G.addic)}%</span>`, '再 来 一 局');
+          d.viaIll
+            ? `非法债务彻底压垮了你。<br>这就是“以贷养贷”的终点。<br>
+               <span style="font-size:13px">现实中，请务必远离高利贷、套路贷、网贷陷阱。</span>`
+            : `本金归零。<br>你被市场的巨齿碾碎了。<br>
+               <span style="font-size:13px">最终成就：中毒度 ${Math.round(Game.G.addic)}%</span>`, '再 来 一 局');
+      }
+      if (ev === 'illBorrow') {
+        UI.tempFace('panic', '借高利贷……你会后悔的。到期连本带利，跑不掉的。', 3200, 'av-shake');
+        UI.toast('⚠ 已借入非法贷款，利息正在飞速滚动', 'bad');
+      }
+      if (ev === 'collect') {
+        const msgs = {
+          1: '📩 短信轰炸：催收开始了……',
+          2: '📢 爆通讯录：你的亲友都被骚扰了！',
+          3: '🚪 上门催收！财产被强制处置！'
+        };
+        UI.toast(msgs[d.stage] || '催收升级', 'bad');
+        if (d.stage >= 2) UI.tempFace('panic', '完了……他们打给我妈了……这就是网贷的代价。', 3600, 'av-shake');
+      }
+      if (ev === 'civBorrow') {
+        UI.toast('已借入「' + d.product.name + '」，记得按时还款', 'warn');
+      }
+      if (ev === 'civOverdue') {
+        if (d.kind === 'friend') {
+          UI.tempFace('sad', '借朋友的钱没还……人情要凉了。', 3400, 'av-shake');
+          UI.toast('⚠ 亲友借款逾期，人情受损', 'bad');
+        } else {
+          UI.tempFace('panic', '征信逾期了！以后贷款、买房都会受影响。', 3600, 'av-shake');
+          UI.toast('⚠ 消费信贷逾期，征信受损', 'bad');
+        }
       }
       if (ev === 'badge') UI.toast('🏅 解锁成就：' + d.name, 'ok');
       if (ev === 'limitUp') {
