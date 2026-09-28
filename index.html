@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>FX战士·韭留美 ── 真实数据炒股模拟</title>
+<meta name="description" content="基于真实A股行情的模拟炒股游戏，含杠杆、爆仓、退場系统">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffd23f' stroke='%23191318' stroke-width='3'/%3E%3Cpath d='M7 23 L13 15 L18 19 L25 9' stroke='%23e6392e' stroke-width='4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<!-- ===== 加载幕 ===== -->
+<div id="boot" class="boot">
+  <div class="boot-inner">
+    <div class="boot-title">FX 战士 韭留美</div>
+    <div class="boot-sub">正在载入真实行情数据…</div>
+    <div class="boot-bar"><i id="bootBar"></i></div>
+  </div>
+</div>
+
+<!-- ===== 开场 / 模式选择 ===== -->
+<div id="intro" class="modal-wrap hidden">
+  <div class="modal comic-box">
+    <div class="speedlines"></div>
+    <div class="intro-head">
+      <div class="intro-av" id="introAvatar"></div>
+      <div class="intro-bubble">
+        <div class="bubble">
+          <p id="introLine">老实赚钱…很枯燥吧？</p>
+        </div>
+      </div>
+    </div>
+    <h1 class="big-title">FX 战士 · 韭留美</h1>
+    <p class="intro-desc">
+      真实 A 股历史行情驱动的模拟盘。涨停跌停、手续费印花税全都有。<br>
+      嫌不够刺激？可以开<b>杠杆</b>——但维持率跌破 100% 会 <span class="danger">ロスカット</span>，
+      然后你就 <span class="danger">退 場</span> 了。
+    </p>
+
+    <div class="mode-pick">
+      <button class="mode-card" data-mode="replay">
+        <span class="mode-tag">推荐</span>
+        <span class="mode-name">历史回放</span>
+        <span class="mode-note">随机穿越到真实历史的某一天，之后每手操作都面对真实走势</span>
+      </button>
+      <button class="mode-card" data-mode="live">
+        <span class="mode-tag">Live</span>
+        <span class="mode-name">实盘同步</span>
+        <span class="mode-note">对接当日真实实时行情，价格持续刷新，可看真实分时</span>
+      </button>
+    </div>
+
+    <label class="t0-check hidden" id="t0Wrap">
+      <input type="checkbox" id="t0Check">
+      解除 T+1 限制（允许当天买当天卖，纯属图好玩）
+    </label>
+
+    <div class="lever-pick">
+      <div class="lever-label">初始杠杆 <b id="introLevVal">1x</b> <span class="hint">（现货，不会爆仓。胆子大的往右拉）</span></div>
+      <input type="range" id="introLev" min="0" max="6" step="1" value="0">
+      <div class="lever-ticks"><span>1x</span><span>2x</span><span>3x</span><span>5x</span><span>10x</span><span>25x</span><span class="fx">FX</span></div>
+    </div>
+
+    <div class="intro-btns">
+      <button class="btn btn-primary btn-xl" id="startBtn">开 始 交 易</button>
+      <button class="btn btn-ghost" id="continueBtn">读取存档</button>
+    </div>
+    <div class="disclaimer">
+      全部数据为真实行情，仅供娱乐与学习，不构成任何投资建议。<br>
+      本作角色「韭留美」为原创形象。
+    </div>
+  </div>
+</div>
+
+<!-- ===== 主界面 ===== -->
+<div class="app hidden" id="app">
+
+  <!-- 顶部 HUD -->
+  <header class="hud">
+    <div class="hud-brand">
+      <div class="logo">FX<span class="logo-red">戦</span>士<span class="logo-sub">韭留美</span></div>
+      <div class="hud-mode">
+        <span id="modeBadge" class="badge">历史回放</span>
+        <span id="dateBadge" class="badge badge-date">--</span>
+        <span id="liveDot" class="live-dot hidden" title="实时行情已连接"></span>
+      </div>
+    </div>
+
+    <div class="hud-stats">
+      <div class="stat">
+        <span class="stat-k">净资产</span>
+        <span class="stat-v" id="sEquity">¥0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-k">收益率</span>
+        <span class="stat-v" id="sReturn">0.00%</span>
+      </div>
+      <div class="stat">
+        <span class="stat-k">可用资金</span>
+        <span class="stat-v" id="sAvail">¥0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-k">持仓市值</span>
+        <span class="stat-v" id="sMktVal">¥0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-k">浮动盈亏</span>
+        <span class="stat-v" id="sPnl">¥0</span>
+      </div>
+    </div>
+
+    <div class="hud-char">
+      <div class="char-box">
+        <div class="char-bubble" id="charBubble"><p>…</p></div>
+        <div class="char-av" id="charAvatar"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- 维持率血条 -->
+  <div class="margin-bar" id="marginBar">
+    <div class="mb-left">
+      <span class="mb-title">维持担保比例</span>
+      <span class="mb-val" id="mbVal">--</span>
+    </div>
+    <div class="mb-track">
+      <i class="mb-fill" id="mbFill"></i>
+      <i class="mb-line" style="left:20%"></i>
+      <i class="mb-line" style="left:26%"></i>
+    </div>
+    <div class="mb-right">
+      <span class="lev-chip" id="levChip">杠杆 1x</span>
+    </div>
+  </div>
+
+  <!-- 三栏主体 -->
+  <main class="grid">
+
+    <!-- 左：股票池 -->
+    <aside class="panel col-left">
+      <div class="panel-hd">
+        <span>自选股</span>
+        <span class="hd-tools">
+          <button class="mini-btn" id="sortBtn" title="切换排序">⇅</button>
+        </span>
+      </div>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜代码 / 名称 / 行业，如 茅台">
+      </div>
+      <div class="list-wrap" id="stockList"></div>
+      <div class="index-strip" id="indexStrip"></div>
+    </aside>
+
+    <!-- 中：图表 + 交易 -->
+    <section class="panel col-mid">
+      <div class="top-banner" id="topBanner">
+        <div class="tb-left">
+          <div class="tb-name"><b id="curName">--</b> <span id="curCode"></span></div>
+          <div class="tb-price"><span id="curPrice">--</span>
+            <span id="curChg" class="chg">--</span></div>
+        </div>
+        <div class="tb-right">
+          <div class="tb-item"><span>今开</span><b id="curOpen">--</b></div>
+          <div class="tb-item"><span>最高</span><b id="curHigh">--</b></div>
+          <div class="tb-item"><span>最低</span><b id="curLow">--</b></div>
+          <div class="tb-item"><span>昨收</span><b id="curPrev">--</b></div>
+          <div class="tb-item"><span>换手</span><b id="curTurn">--</b></div>
+        </div>
+      </div>
+
+      <div class="chart-tabs">
+        <button class="ctab active" data-view="kline">日K</button>
+        <button class="ctab" data-view="week">周K</button>
+        <button class="ctab" data-view="minute">分时</button>
+        <span class="chart-tip">滚轮缩放 / 拖动平移</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="kchart"></canvas>
+        <div class="crosshair hidden" id="crosshair"></div>
+      </div>
+
+      <!-- 交易面板 -->
+      <div class="trade-panel">
+        <div class="tp-left">
+          <div class="tp-row">
+            <span class="tp-label">价格</span>
+            <button class="mini-btn" id="priceMinus">−</button>
+            <input type="number" id="priceInput" step="0.01" value="0">
+            <button class="mini-btn" id="pricePlus">+</button>
+            <button class="mini-btn wide" id="priceMkt">市价</button>
+          </div>
+          <div class="tp-row">
+            <span class="tp-label">数量</span>
+            <button class="mini-btn" id="qtyMinus">−</button>
+            <input type="number" id="qtyInput" step="100" value="0">
+            <button class="mini-btn" id="qtyPlus">+</button>
+            <span class="tp-unit">股</span>
+          </div>
+          <div class="tp-row quick-row">
+            <button class="qbtn" data-q="all">全仓</button>
+            <button class="qbtn" data-q="half">1/2</button>
+            <button class="qbtn" data-q="third">1/3</button>
+            <button class="qbtn" data-q="quarter">1/4</button>
+            <button class="qbtn" data-q="clear">清空</button>
+          </div>
+        </div>
+        <div class="tp-mid">
+          <div class="calc">
+            <div><span>预计金额</span><b id="calcAmt">¥0</b></div>
+            <div><span>手续费</span><b id="calcFee">¥0</b></div>
+            <div><span>占用保证金</span><b id="calcMargin">¥0</b></div>
+          </div>
+        </div>
+        <div class="tp-right">
+          <button class="btn btn-buy" id="buyBtn"><b>买 入</b><span id="buySub">可用 ¥0</span></button>
+          <button class="btn btn-sell" id="sellBtn"><b>卖 出</b><span id="sellSub">可卖 0 股</span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右：持仓 + 记录 -->
+    <aside class="panel col-right">
+      <div class="panel-hd">
+        <span>持仓 <b id="posCount">0</b></span>
+        <span class="hd-tools">
+          <button class="mini-btn" id="closeAllBtn" title="全部平仓">一键平仓</button>
+        </span>
+      </div>
+      <div class="list-wrap list-pos" id="posList"></div>
+
+      <div class="panel-hd sub">
+        <span>委托成交</span>
+        <span class="hd-tools"><button class="mini-btn" id="clearLog">清空</button></span>
+      </div>
+      <div class="list-wrap list-log" id="logList"></div>
+    </aside>
+  </main>
+
+  <!-- 底部 -->
+  <footer class="bottom-row">
+    <div class="panel foot-equity">
+      <div class="panel-hd"><span>战绩曲线</span>
+        <span class="hd-tools" id="equityHint">对比：<b class="bench">沪深300</b></span></div>
+      <div class="chart-wrap mini"><canvas id="equityChart"></canvas></div>
+    </div>
+    <div class="panel foot-badge">
+      <div class="panel-hd"><span>成就 · 中毒度</span></div>
+      <div class="addiction">
+        <div class="add-bar"><i id="addFill"></i></div>
+        <span class="add-txt" id="addTxt">中毒度 0%</span>
+      </div>
+      <div class="badges" id="badges"></div>
+    </div>
+    <div class="panel foot-ctrl">
+      <div class="panel-hd"><span>时间机器</span></div>
+      <div class="ctrl-btns">
+        <button class="btn btn-time" id="nextDayBtn">推进 1 日</button>
+        <button class="btn btn-time" id="next5Btn">×5</button>
+        <button class="btn btn-time" id="autoBtn">自动 ▶</button>
+      </div>
+      <div class="ctrl-btns">
+        <button class="btn btn-ghost sm" id="leverBtn">调杠杆</button>
+        <button class="btn btn-ghost sm" id="restartBtn">重开</button>
+      </div>
+      <div class="stats-mini" id="statsMini"></div>
+    </div>
+  </footer>
+</div>
+
+<!-- ===== 退場 / 事件全屏漫画 ===== -->
+<div id="fx" class="fx-layer hidden">
+  <div class="fx-lines"></div>
+  <div class="fx-inner">
+    <div class="fx-av" id="fxAvatar"></div>
+    <div class="fx-word" id="fxWord">退 場</div>
+    <div class="fx-sub" id="fxSub"></div>
+    <button class="btn btn-primary" id="fxBtn">重 新 开 始</button>
+  </div>
+</div>
+
+<!-- ===== Toast ===== -->
+<div id="toast" class="toast"></div>
+
+<!-- ===== 杠杆弹窗 ===== -->
+<div id="levModal" class="modal-wrap hidden">
+  <div class="modal comic-box sm">
+    <h2 class="big-title sm">调整杠杆</h2>
+    <p class="intro-desc">提高杠杆会立刻<b>降低</b>所需保证金，但也让退場来得更快。要不要再贪一点？</p>
+    <div class="lever-pick">
+      <div class="lever-label">杠杆 <b id="levVal">1x</b></div>
+      <input type="range" id="levSlider" min="0" max="6" step="1" value="0">
+      <div class="lever-ticks"><span>1x</span><span>2x</span><span>3x</span><span>5x</span><span>10x</span><span>25x</span><span class="fx">FX</span></div>
+    </div>
+    <div class="intro-btns"><button class="btn btn-primary" id="levOk">确 定</button></div>
+  </div>
+</div>
+
+<script src="data/snapshot.js"></script>
+<script src="assets/js/character.js"></script>
+<script src="assets/js/chart.js"></script>
+<script src="assets/js/market.js"></script>
+<script src="assets/js/game.js"></script>
+<script src="assets/js/ui.js"></script>
+<script src="assets/js/main.js"></script>
+</body>
+</html>
