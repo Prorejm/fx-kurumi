@@ -28,7 +28,7 @@
     const av = document.getElementById('introAvatar');
     const lineEl = document.getElementById('introLine');
     av.innerHTML = Char.face('greedy', { anim: 'av-bounce' });
-    lineEl.innerHTML = Char.line('greeting')[0];
+    lineEl.innerHTML = Char.line('greeting');
 
     const levSlider = document.getElementById('introLev');
     const levVal = document.getElementById('introLevVal');
